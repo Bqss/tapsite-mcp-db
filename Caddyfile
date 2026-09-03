@@ -1,0 +1,23 @@
+db.tapsite.ai {
+    reverse_proxy localhost:3100 {
+        # SSE needs long-lived connections and no buffering
+        flush_interval -1
+        transport http {
+            read_timeout 300s
+            write_timeout 300s
+        }
+    }
+
+    # CORS — allow MCP clients to connect from anywhere
+    header {
+        Access-Control-Allow-Origin "*"
+        Access-Control-Allow-Methods "GET, POST, OPTIONS"
+        Access-Control-Allow-Headers "Content-Type, Authorization"
+    }
+
+    # Handle SSE preflight
+    @options method OPTIONS
+    handle @options {
+        respond 204
+    }
+}
