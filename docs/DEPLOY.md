@@ -9,7 +9,7 @@ MCP client connect via URL `https://db.tapsite.ai/sse`.
 ## Prasyarat Server
 
 - Linux server (Ubuntu/Debian) dengan akses `sudo`
-- **Node.js 20+** terinstall
+- **Node.js 20.6+** terinstall
 - **PM2** terinstall: `npm install -g pm2`
 - **Caddy** terinstall: lihat [caddyserver.com/docs/install](https://caddyserver.com/docs/install)
 - **PostgreSQL** tapsite accessible dari server (localhost atau remote)
