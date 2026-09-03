@@ -21,13 +21,13 @@ MCP client connect via URL `https://db.tapsite.ai/sse`.
 
 ```bash
 # Di server
-cd /home/admin/tapsite-mcp-db
+cd ~/tapsite-mcp-db
 npm install
 npm run build
 mkdir -p logs
 ```
 
-> Jika project tapsite-new sudah ada di server, cukup `cd` ke `mcp/` subdirectory.
+> Path `cwd` dan `out_file` di `ecosystem.config.cjs` menggunakan `__dirname` (auto-resolve ke lokasi file), jadi project bisa di mana saja.
 
 ## 2. Set environment variables
 
@@ -44,7 +44,7 @@ module.exports = {
     {
       name: "tapsite-db-mcp",
       script: "dist/index.js",
-      cwd: "/home/admin/tapsite-mcp-db",
+      cwd: __dirname,
       env: {
         PGHOST: "127.0.0.1",
         PGPORT: "3309",
@@ -60,8 +60,8 @@ module.exports = {
       max_restarts: 10,
       restart_delay: 3000,
       watch: false,
-      out_file: "/home/admin/tapsite-mcp-db/logs/out.log",
-      error_file: "/home/admin/tapsite-mcp-db/logs/error.log",
+      out_file: `${__dirname}/logs/out.log`,
+      error_file: `${__dirname}/logs/error.log`,
       merge_logs: true,
       time: true,
     },
@@ -76,7 +76,7 @@ module.exports = {
 ## 3. Start dengan PM2
 
 ```bash
-cd /home/admin/tapsite-mcp-db
+cd ~/tapsite-mcp-db
 pm2 start ecosystem.config.cjs
 pm2 save
 ```
@@ -107,7 +107,7 @@ pm2 save
 Append `Caddyfile` project ke Caddyfile utama server:
 
 ```bash
-sudo cat /home/admin/tapsite-mcp-db/Caddyfile >> /etc/caddy/Caddyfile
+sudo cat ~/tapsite-mcp-db/Caddyfile >> /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
@@ -203,7 +203,7 @@ Test dari MCP client — connect ke URL `https://db.tapsite.ai/sse` dengan heade
 ## Update / Restart
 
 ```bash
-cd /home/admin/tapsite-mcp-db
+cd ~/tapsite-mcp-db
 git pull
 npm install
 npm run build

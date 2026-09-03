@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "tapsite-db-mcp",
       script: "dist/index.js",
-      cwd: "/home/admin/tapsite-mcp-db",
+      cwd: __dirname,
       env: {
         PGHOST: "127.0.0.1",
         PGPORT: "3309",
@@ -19,8 +19,8 @@ module.exports = {
       max_restarts: 10,
       restart_delay: 3000,
       watch: false,
-      out_file: "/home/admin/tapsite-mcp-db/logs/out.log",
-      error_file: "/home/admin/tapsite-mcp-db/logs/error.log",
+      out_file: `${__dirname}/logs/out.log`,
+      error_file: `${__dirname}/logs/error.log`,
       merge_logs: true,
       time: true,
     },
