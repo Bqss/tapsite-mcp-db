@@ -23,7 +23,7 @@ MCP (Model Context Protocol) server untuk **readonly query** ke database Postgre
 ```json
 {
   "mcpServers": {
-    "tapsite-db": {
+    "tapsite-mcp": {
       "url": "https://db.tapsite.ai/sse",
       "headers": {
         "Authorization": "Bearer <token>"

@@ -129,10 +129,16 @@ function formatResult(rows: unknown[], truncated: boolean, totalShown: number): 
 
 // ─── Server ────────────────────────────────────────────────────────
 
-const server = new McpServer({
-  name: "tapsite-db",
-  version: "1.0.0",
-});
+/**
+ * Create a fresh McpServer instance with all tools registered.
+ * Each SSE connection gets its own instance — the SDK does not allow
+ * reusing a single McpServer across multiple transports.
+ */
+function createServer(): McpServer {
+  const server = new McpServer({
+    name: "tapsite-db",
+    version: "1.0.0",
+  });
 
 // ── list_tables ───────────────────────────────────────────────────
 
@@ -350,6 +356,9 @@ server.tool(
   },
 );
 
+  return server;
+}
+
 // ─── Auth (SSE mode) ───────────────────────────────────────────────
 
 function extractToken(req: express.Request): string | null {
@@ -399,7 +408,7 @@ async function main() {
       const transport = new SSEServerTransport("/messages", res);
       sessions.set(transport.sessionId, transport);
       res.on("close", () => sessions.delete(transport.sessionId));
-      await server.connect(transport);
+      await createServer().connect(transport);
     });
 
     app.post("/messages", async (req, res) => {
@@ -425,9 +434,8 @@ async function main() {
         `[tapsite-db-mcp] SSE server on port ${MCP_PORT} — db=${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database}, max_rows=${MAX_ROWS}, auth=${AUTH_TOKEN ? "enabled" : "disabled"}`,
       );
     });
-  } else {
     const transport = new StdioServerTransport();
-    await server.connect(transport);
+    await createServer().connect(transport);
     console.error(
       `[tapsite-db-mcp] stdio connected — db=${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database}, max_rows=${MAX_ROWS}`,
     );
