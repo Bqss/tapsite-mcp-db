@@ -13,8 +13,6 @@ module.exports = {
         MCP_PORT: "3100",
         MCP_DB_MAX_ROWS: "500",
         MCP_AUTH_TOKEN: "Allahuakbar21.a",
-        TAPSITE_BASE_URL: "http://localhost:55555",
-        TAPSITE_API_KEY: "tsk_production_key_here",
       },
       instances: 1,
       autorestart: true,

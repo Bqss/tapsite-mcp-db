@@ -54,8 +54,6 @@ module.exports = {
         MCP_PORT: "3100",
         MCP_DB_MAX_ROWS: "500",
         MCP_AUTH_TOKEN: "hasil-openssl-rand-hex-32-disini",
-        TAPSITE_BASE_URL: "http://localhost:55555",
-        TAPSITE_API_KEY: "tsk_production_key_here",
       },
       instances: 1,
       autorestart: true,
@@ -74,6 +72,12 @@ module.exports = {
 > `MCP_PORT=3100` mengaktifkan mode SSE. Tanpa ini server jalan mode stdio (tidak cocok untuk deploy).
 >
 > `MCP_AUTH_TOKEN` wajib di-set untuk production. Tanpa ini, endpoint SSE terbuka tanpa auth — siapa saja yang bisa reach port 3100 bisa query database.
+
+> **TAPSITE_API_KEY** dan **TAPSITE_BASE_URL** untuk workspace management tools (`create_workspace`, `check_subdomain`, `update_workspace_domain`) di-set di `.env`, bukan di `ecosystem.config.cjs`. Tambahkan di file `.env`:
+> ```
+> TAPSITE_BASE_URL=http://localhost:55555
+> TAPSITE_API_KEY=tsk_production_key_here
+> ```
 
 ## 3. Start dengan PM2
 
