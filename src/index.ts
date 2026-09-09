@@ -22,6 +22,11 @@ const MAX_ROWS = Number(process.env.MCP_DB_MAX_ROWS || 500);
 const MCP_PORT = parseInt(process.env.MCP_PORT || "0");
 const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 
+// ─── Tapsite API (HTTP — for workspace management tools) ──────────
+
+const TAPSITE_BASE_URL = process.env.TAPSITE_BASE_URL || "http://localhost:5555";
+const TAPSITE_API_KEY = process.env.TAPSITE_API_KEY || "";
+
 // ─── Database ──────────────────────────────────────────────────────
 
 /**
@@ -125,6 +130,76 @@ function formatResult(rows: unknown[], truncated: boolean, totalShown: number): 
     ? `\n\n[Truncated: showing ${totalShown} of more rows. Refine your query or raise MCP_DB_MAX_ROWS (currently ${MAX_ROWS}).]`
     : `\n\n[${totalShown} row(s)]`;
   return JSON.stringify(rows, null, 2) + meta;
+}
+
+// ─── HTTP helper (for workspace management tools) ──────────────────
+
+interface HttpResult {
+  [x: string]: unknown;
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+}
+
+async function makeHttpRequest(
+  method: string,
+  path: string,
+  body?: Record<string, unknown>,
+  extraFetchOptions?: RequestInit,
+): Promise<HttpResult> {
+  const url = `${TAPSITE_BASE_URL}${path}`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (TAPSITE_API_KEY) {
+    headers["Authorization"] = `Bearer ${TAPSITE_API_KEY}`;
+  }
+
+  try {
+    const options: RequestInit = { method, headers, ...extraFetchOptions };
+    if (body && method !== "GET" && method !== "DELETE") {
+      options.body = JSON.stringify(body);
+    }
+
+    const res = await fetch(url, options);
+    const text = await res.text();
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+
+    // Handle redirects (e.g. POST /workspaces returns 302)
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("Location") || "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ redirect: true, status: res.status, location, body: parsed }, null, 2),
+          },
+        ],
+      };
+    }
+
+    if (!res.ok) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: true, status: res.status, statusText: res.statusText, body: parsed }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(parsed, null, 2) }],
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Request failed: ${message}` }], isError: true };
+  }
 }
 
 // ─── Server ────────────────────────────────────────────────────────
@@ -356,6 +431,45 @@ server.tool(
   },
 );
 
+// ── Workspace Management (HTTP — Tapsite API) ────────────────────
+
+server.tool(
+  "create_workspace",
+  "Create a new workspace. The domain parameter is a subdomain slug (e.g. 'mybrand') — the server appends '.tapsite.ai' automatically. Returns the workspace ID and full domain. Requires an active subscription or sufficient token credit for non-subscribers beyond the free tier limit.",
+  {
+    name: z.string().describe("Workspace name"),
+    domain: z.string().describe("Subdomain slug (e.g. 'mybrand' — becomes 'mybrand.tapsite.ai'). Lowercase alphanumeric with hyphens only."),
+    industry: z.string().optional().describe("Industry / business category (e.g. 'Teknologi', 'E-Commerce')"),
+  },
+  async (params) => {
+    return makeHttpRequest("POST", "/workspaces", params, { redirect: "manual" });
+  },
+);
+
+server.tool(
+  "check_subdomain",
+  "Check if a subdomain is available for workspace creation. Pass the subdomain slug (e.g. 'mybrand') — the tool appends '.tapsite.ai' automatically. Returns { exists: boolean }.",
+  {
+    subdomain: z.string().describe("Subdomain slug to check (e.g. 'mybrand' — checked as 'mybrand.tapsite.ai')"),
+  },
+  async (params) => {
+    const fullDomain = `${params.subdomain}.tapsite.ai`;
+    return makeHttpRequest("GET", `/api/check-subdomain?subdomain=${encodeURIComponent(fullDomain)}`);
+  },
+);
+
+server.tool(
+  "update_workspace_domain",
+  "Update the domain of a workspace. For custom domains (e.g. 'example.com'), the user must have a Pro subscription and the domain must be configured via Cloudflare (A record to 185.227.135.88 or CNAME to cname.id.tapsite.ai with orange-cloud proxy enabled) before calling this. Can also switch back to a tapsite.ai subdomain. Returns success message.",
+  {
+    workspace_id: z.string().describe("UUID of the workspace"),
+    domain: z.string().describe("New domain (e.g. 'customdomain.com' for custom domain, or 'newsub.tapsite.ai' for subdomain)"),
+  },
+  async (params) => {
+    return makeHttpRequest("PUT", `/workspaces/${params.workspace_id}/domain`, { domain: params.domain });
+  },
+);
+
   return server;
 }
 
@@ -434,6 +548,7 @@ async function main() {
         `[tapsite-db-mcp] SSE server on port ${MCP_PORT} — db=${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database}, max_rows=${MAX_ROWS}, auth=${AUTH_TOKEN ? "enabled" : "disabled"}`,
       );
     });
+  } else {
     const transport = new StdioServerTransport();
     await createServer().connect(transport);
     console.error(

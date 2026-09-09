@@ -24,9 +24,9 @@ MCP (Model Context Protocol) server untuk **readonly query** ke database Postgre
 {
   "mcpServers": {
     "tapsite-mcp": {
-      "url": "https://db.tapsite.ai/sse",
+      "url": "https://mcp.tapsite.ai/sse",
       "headers": {
-        "Authorization": "Bearer <token>"
+        "Authorization": "Bearer d785d99369f8ce17ec4b1f9a6293d37a3161366e98f04806c2c4566b98b89259"
       }
     }
   }
@@ -50,7 +50,7 @@ MCP (Model Context Protocol) server untuk **readonly query** ke database Postgre
 
 > Jika client tidak support custom headers, gunakan query param: `https://db.tapsite.ai/sse?api_key=<token>`
 
-Setelah edit config, restart MCP client. Tool `list_tables`, `describe_table`, `query` akan muncul.
+Setelah edit config, restart MCP client. Tool `list_tables`, `describe_table`, `query`, `create_workspace`, `check_subdomain`, `update_workspace_domain` akan muncul.
 
 ---
 
@@ -77,6 +77,30 @@ Parameter: `sql` (string) — single SELECT statement.
 - Multi-statement (semicolon di tengah)
 - Statement tidak dimulai dengan `SELECT` atau `WITH`
 
+### `create_workspace`
+
+Create workspace baru. Parameter `domain` adalah subdomain slug (e.g. `mybrand`) — server otomatis append `.tapsite.ai`.
+
+Parameter: `name` (string), `domain` (string — subdomain slug), `industry` (string, optional).
+
+**Response:** 302 redirect — workspace ID ada di `location` field.
+
+### `check_subdomain`
+
+Cek apakah subdomain tersedia. Tool otomatis append `.tapsite.ai`.
+
+Parameter: `subdomain` (string — slug saja, e.g. `mybrand`).
+
+**Response:** `{ "exists": false }` — `true` = sudah dipakai, `false` = tersedia.
+
+### `update_workspace_domain`
+
+Update domain workspace. Custom domain butuh Pro subscription + Cloudflare DNS (A record `185.227.135.88` atau CNAME `cname.id.tapsite.ai` dengan orange-cloud proxy).
+
+Parameter: `workspace_id` (string), `domain` (string — full domain baru).
+
+**Response:** `{ "message": "Domain berhasil diubah" }`
+
 ---
 
 ## Safety Layer
@@ -97,9 +121,12 @@ Akses readonly di-enforce 3 lapis:
 │  (omp/Claude)│   Bearer token   │   (Node.js)      │               │  (tapsite database)│
 └──────────────┘                  └──────────────────┘               └────────────────────┘
                                          │
-                                         ├─ list_tables    → SELECT pg_tables + count(*)
-                                         ├─ describe_table → information_schema + pg_index
-                                         └─ query          → SELECT (validated, BEGIN READ ONLY)
+                                         ├─ list_tables         → SELECT pg_tables + count(*)
+                                         ├─ describe_table      → information_schema + pg_index
+                                         ├─ query               → SELECT (validated, BEGIN READ ONLY)
+                                         ├─ create_workspace    → POST /workspaces (HTTP → Tapsite API)
+                                         ├─ check_subdomain     → GET /api/check-subdomain (HTTP → Tapsite API)
+                                         └─ update_workspace_domain → PUT /workspaces/:id/domain (HTTP → Tapsite API)
 ```
 
 ---
@@ -227,5 +254,7 @@ Hanya relevan untuk local dev / server deploy. Client yang connect via SSE tidak
 | `MCP_DB_MAX_ROWS` | tidak | `500` | Max rows per query result. Sisa row di-truncate |
 | `MCP_PORT` | tidak | — | Port SSE server. Kosong = stdio mode, di-set (e.g. `3100`) = SSE mode |
 | `MCP_AUTH_TOKEN` | tidak | — | Shared secret untuk SSE auth. Kosong = auth disabled. **Wajib di-set untuk production** |
+| `TAPSITE_BASE_URL` | tidak | `http://localhost:5555` | URL server tapsite (untuk workspace management tools) |
+| `TAPSITE_API_KEY` | tidak | — | API key `tsk_...` dari Profile → API Keys. Dibutuhkan untuk `create_workspace`, `check_subdomain`, `update_workspace_domain` |
 
 > Local dev: set di `.env` (lihat `.env.example`). Production: set di `ecosystem.config.cjs` (lihat [DEPLOY.md](./DEPLOY.md)).
