@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "tapsite-db-mcp",
       script: "dist/index.js",
-      cwd: __dirname,
+      node_args: "--env-file=.env",
       env: {
         PGHOST: "127.0.0.1",
         PGPORT: "3309",
