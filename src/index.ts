@@ -4,6 +4,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
 import pg from "pg";
+import { readFileSync } from "fs";
+import { extname, basename } from "path";
 import { z } from "zod";
 
 const { Client } = pg;
@@ -27,6 +29,10 @@ const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 
 const TAPSITE_BASE_URL = process.env.TAPSITE_BASE_URL || "http://localhost:5555";
 const TAPSITE_API_KEY = process.env.TAPSITE_API_KEY || "";
+
+// ─── Pexels API (for image search) ────────────────────────────────
+
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY || "";
 
 // ─── Database ──────────────────────────────────────────────────────
 
@@ -468,6 +474,316 @@ server.tool(
   },
   async (params) => {
     return makeHttpRequest("PUT", `/workspaces/${params.workspace_id}/domain`, { domain: params.domain });
+  },
+);
+
+// ── Blog Management (HTTP — Tapsite API) ──────────────────────────
+
+server.tool(
+  "list_blogs",
+  "List blog posts in a workspace with pagination, search, and status filter. Returns blogs array, pagination info, and status_counts.",
+  {
+    workspace_id: z.string().describe("UUID of the workspace"),
+    page: z.number().optional().describe("Page number (default: 1)"),
+    limit: z.number().optional().describe("Posts per page (default: 10)"),
+    search: z.string().optional().describe("Search in title, excerpt, content, author (LIKE)"),
+    status: z.string().optional().describe("Filter: published | draft | scheduled"),
+  },
+  async (params) => {
+    const qs = new URLSearchParams();
+    if (params.page) qs.set("page", String(params.page));
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.search) qs.set("search", params.search);
+    if (params.status) qs.set("status", params.status);
+    const s = qs.toString();
+    return makeHttpRequest("GET", `/api/workspaces/${params.workspace_id}/blogs${s ? `?${s}` : ""}`);
+  },
+);
+
+server.tool(
+  "create_blog_post",
+  "Create a blog post in a workspace. Slug is auto-generated from title (slugify). If slug already exists in the same workspace, a random suffix is appended. Returns post ID and slug.",
+  {
+    workspace_id: z.string().describe("UUID of the workspace"),
+    title: z.string().describe("Post title"),
+    content: z.string().describe("Post content in markdown (HTML tags allowed). Parsed via markdown-it at render time — supports headings, lists, code blocks, links, images, tables, blockquotes, etc."),
+    status: z.string().describe("Post status: 'draft' or 'published'"),
+    excerpt: z.string().optional().describe("Post summary/excerpt"),
+    mode: z.string().optional().describe("'manual' or 'ai' (default: manual)"),
+    language: z.string().optional().describe("Language code (default: en)"),
+    category: z.string().optional().describe("Category name"),
+    tags: z.array(z.string()).optional().describe("Array of tag names"),
+    meta_title: z.string().optional().describe("SEO title"),
+    meta_description: z.string().optional().describe("SEO description"),
+    meta_keywords: z.string().optional().describe("SEO keywords (comma-separated)"),
+    ai_model: z.string().nullable().optional().describe("AI model used (if mode=ai)"),
+    read_time: z.number().optional().describe("Estimated read time in minutes"),
+    domain: z.string().nullable().optional().describe("Custom domain override"),
+  },
+  async (params) => {
+    const { workspace_id, ...body } = params;
+    return makeHttpRequest("POST", `/workspaces/${workspace_id}/blogs`, body);
+  },
+);
+
+server.tool(
+  "get_blog_post",
+  "Get a single blog post by ID. Returns the full blog_posts row including content (raw markdown, not parsed), metadata, and stats.",
+  {
+    post_id: z.string().describe("UUID of the blog post"),
+  },
+  async (params) => {
+    return makeHttpRequest("GET", `/api/blog/${params.post_id}`);
+  },
+);
+
+server.tool(
+  "update_blog_post",
+  "Update a blog post by ID. If status changes from draft to published, published_at is set automatically. Returns updated post ID, slug, title, and status.",
+  {
+    post_id: z.string().describe("UUID of the blog post"),
+    title: z.string().describe("Post title"),
+    content: z.string().describe("Post content in markdown (HTML tags allowed). Parsed via markdown-it at render time."),
+    slug: z.string().describe("Post slug (unique per workspace)"),
+    status: z.string().describe("Post status: 'draft' or 'published'"),
+    excerpt: z.string().optional().describe("Post summary/excerpt"),
+    category: z.string().optional().describe("Category name"),
+    tags: z.array(z.string()).optional().describe("Array of tag names"),
+    featured_image: z.string().optional().describe("Featured image URL"),
+    image_caption: z.string().optional().describe("Image caption"),
+    meta_title: z.string().optional().describe("SEO title (default: title)"),
+    meta_description: z.string().optional().describe("SEO description"),
+    meta_keywords: z.string().optional().describe("SEO keywords (comma-separated)"),
+  },
+  async (params) => {
+    const { post_id, ...body } = params;
+    return makeHttpRequest("PUT", `/blog/${post_id}`, body);
+  },
+);
+
+server.tool(
+  "delete_blog_post",
+  "Delete a blog post by ID (workspace-scoped). Verifies workspace access and post ownership. Returns success message.",
+  {
+    workspace_id: z.string().describe("UUID of the workspace"),
+    post_id: z.string().describe("UUID of the blog post"),
+  },
+  async (params) => {
+    return makeHttpRequest("DELETE", `/workspaces/${params.workspace_id}/blogs/${params.post_id}`);
+  },
+);
+
+server.tool(
+  "delete_blog_post_by_id",
+  "Delete a blog post by ID only (without workspace scope). Only checks user_id ownership. Returns post ID and success flag.",
+  {
+    post_id: z.string().describe("UUID of the blog post"),
+  },
+  async (params) => {
+    return makeHttpRequest("DELETE", `/blog/${params.post_id}`);
+  },
+);
+
+server.tool(
+  "check_slug",
+  "Check if a slug is available. If post_id is provided, that post is excluded from the check (for editing existing posts). Returns { available: boolean, slug: string }.",
+  {
+    slug: z.string().describe("Slug to check"),
+    post_id: z.string().optional().describe("UUID of post to exclude from check (for edits)"),
+  },
+  async (params) => {
+    return makeHttpRequest("POST", "/api/blog/check-slug", params);
+  },
+);
+
+server.tool(
+  "get_blog_analytics",
+  "Get blog analytics for a workspace. Returns totalReaders, newReaders, topTrafficSource, and topArticle.",
+  {
+    workspace_id: z.string().describe("UUID of the workspace"),
+    period: z.string().optional().describe("today | yesterday | last7days | last30days | thismonth | lastmonth | custom (default: last7days)"),
+    start_date: z.string().optional().describe("YYYY-MM-DD (only if period=custom)"),
+    end_date: z.string().optional().describe("YYYY-MM-DD (only if period=custom)"),
+  },
+  async (params) => {
+    const qs = new URLSearchParams();
+    if (params.period) qs.set("period", params.period);
+    if (params.start_date) qs.set("start_date", params.start_date);
+    if (params.end_date) qs.set("end_date", params.end_date);
+    const s = qs.toString();
+    return makeHttpRequest("GET", `/api/workspaces/${params.workspace_id}/blog/analytics${s ? `?${s}` : ""}`);
+  },
+);
+
+// ── Upload Image (HTTP — multipart to Tapsite API) ────────────────
+
+const IMAGE_MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".avif": "image/avif",
+};
+
+server.tool(
+  "upload_image",
+  "Upload an image to Tapsite. Accepts either a local file path or a remote image URL. The image is converted to WebP (max 1200x1200, quality 80) and stored on S3. Returns the public URL — use it in blog content via markdown: ![alt text](url).",
+  {
+    file_path: z.string().optional().describe("Local file path to the image (e.g. '/Users/me/photo.png')"),
+    image_url: z.string().optional().describe("URL of a remote image to download and re-upload (e.g. 'https://example.com/image.jpg')"),
+  },
+  async (params) => {
+    if (!params.file_path && !params.image_url) {
+      return {
+        content: [{ type: "text" as const, text: "Either file_path or image_url is required." }],
+        isError: true,
+      };
+    }
+
+    try {
+      let buffer: Buffer;
+      let mimeType: string;
+      let filename: string;
+
+      if (params.file_path) {
+        buffer = readFileSync(params.file_path);
+        mimeType = IMAGE_MIME[extname(params.file_path).toLowerCase()] || "image/jpeg";
+        filename = basename(params.file_path);
+      } else {
+        const imgRes = await fetch(params.image_url!);
+        if (!imgRes.ok) {
+          return {
+            content: [{ type: "text" as const, text: `Failed to fetch image URL: ${imgRes.status} ${imgRes.statusText}` }],
+            isError: true,
+          };
+        }
+        buffer = Buffer.from(await imgRes.arrayBuffer());
+        mimeType = imgRes.headers.get("content-type") || "image/jpeg";
+        const urlPath = new URL(params.image_url!).pathname;
+        filename = basename(urlPath) || "image.jpg";
+      }
+
+      const formData = new FormData();
+      formData.append("file", new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
+
+      const url = `${TAPSITE_BASE_URL}/api/assets/upload`;
+      const headers: Record<string, string> = {};
+      if (TAPSITE_API_KEY) {
+        headers["Authorization"] = `Bearer ${TAPSITE_API_KEY}`;
+      }
+
+      const res = await fetch(url, { method: "POST", headers, body: formData });
+      const text = await res.text();
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+
+      if (!res.ok) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: true, status: res.status, statusText: res.statusText, body: parsed }, null, 2) }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(parsed, null, 2) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Upload failed: ${message}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ── Search Images (Pexels API) ────────────────────────────────────
+
+server.tool(
+  "search_images",
+  "Search for high-quality stock photos on Pexels. Returns image URLs, photographer credits, and dimensions. Use the returned URL with upload_image (image_url param) to re-upload to Tapsite, or use directly in markdown content: ![alt](url). Requires PEXELS_API_KEY env var.",
+  {
+    query: z.string().describe("Search term (e.g. 'office workspace', 'nature landscape')"),
+    per_page: z.number().optional().describe("Results per page (default: 15, max: 80)"),
+    page: z.number().optional().describe("Page number (default: 1)"),
+    orientation: z.string().optional().describe("Filter: landscape | portrait | square"),
+    size: z.string().optional().describe("Filter: large | medium | small"),
+    color: z.string().optional().describe("Filter by color (hex code like '00a8e8' or color name like 'blue')"),
+  },
+  async (params) => {
+    if (!PEXELS_API_KEY) {
+      return {
+        content: [{ type: "text" as const, text: "PEXELS_API_KEY is not set. Get a free API key at https://www.pexels.com/api/ and set it in .env" }],
+        isError: true,
+      };
+    }
+
+    try {
+      const qs = new URLSearchParams();
+      qs.set("query", params.query);
+      if (params.per_page) qs.set("per_page", String(params.per_page));
+      if (params.page) qs.set("page", String(params.page));
+      if (params.orientation) qs.set("orientation", params.orientation);
+      if (params.size) qs.set("size", params.size);
+      if (params.color) qs.set("color", params.color);
+
+      const res = await fetch(`https://api.pexels.com/v1/search?${qs.toString()}`, {
+        headers: { Authorization: PEXELS_API_KEY },
+      });
+
+      const text = await res.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+
+      if (!res.ok) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: true, status: res.status, statusText: res.statusText, body: parsed }, null, 2) }],
+          isError: true,
+        };
+      }
+
+      const data = parsed as { photos?: Array<{ id: number; width: number; height: number; alt?: string; photographer: string; photographer_url: string; src: { original: string; large: string; medium: string; small: string; portrait: string; landscape: string; tiny: string } }> };
+
+      const photos = (data.photos || []).map((p) => ({
+        id: p.id,
+        alt: p.alt || "",
+        photographer: p.photographer,
+        photographer_url: p.photographer_url,
+        width: p.width,
+        height: p.height,
+        urls: {
+          original: p.src.original,
+          large: p.src.large,
+          medium: p.src.medium,
+          small: p.src.small,
+          landscape: p.src.landscape,
+          portrait: p.src.portrait,
+          tiny: p.src.tiny,
+        },
+      }));
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ total_results: (parsed as { total_results?: number }).total_results || 0, page: params.page || 1, per_page: params.per_page || 15, photos }, null, 2) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Image search failed: ${message}` }],
+        isError: true,
+      };
+    }
   },
 );
 
