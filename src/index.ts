@@ -518,7 +518,8 @@ server.tool(
     meta_keywords: z.string().optional().describe("SEO keywords (comma-separated)"),
     ai_model: z.string().nullable().optional().describe("AI model used (if mode=ai)"),
     read_time: z.number().optional().describe("Estimated read time in minutes"),
-    domain: z.string().nullable().optional().describe("Custom domain override"),
+    featured_image: z.string().optional().describe("Featured image URL"),
+    image_caption: z.string().optional().describe("Image caption"),
   },
   async (params) => {
     const { workspace_id, ...body } = params;
